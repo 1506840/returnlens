@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-归因引擎 v4.1：退货工单 -> 责任方判定 + 证据 + 风险标记
-修复：save_result 强制注入 id，保证下游 review/decision 能关联
+归因引擎 v4.2：退货工单 -> 责任方判定 + 证据 + 风险标记
+新增：有凭证图片时接入 vision.describe_image，作为额外证据源；无图/失败自动降级。
 """
 
 import os
@@ -10,6 +10,8 @@ import json
 import time
 from dotenv import load_dotenv
 from dashscope import Generation
+
+from vision import describe_image
 
 load_dotenv()
 API_KEY = os.getenv("DASHSCOPE_API_KEY")
@@ -39,17 +41,18 @@ ask_user: 需用户补充的信息，无则 null
 risk_flag: 策略性风险描述，无则 null
 
 【判定顺序】
-第一步：判断已有证据能否独立支撑责任方判定。
+第一步：判断已有证据（文字工单 + 可能的凭证图片理解）能否独立支撑责任方判定。
 第二步：证据不足 → needs_more_evidence=true、填 ask_user、confidence ≤ 0.5。
 第三步：证据充分 → needs_more_evidence=false、ask_user=null。
 第四步：填 risk_flag（不影响责任方判定）。
 
 【硬约束】
 1. 原因与责任方是独立字段，必须分别给出。
-2. evidence 必须是原文摘录，不得推断事实。
-3. needs_more_evidence=true 时 confidence 必须 ≤ 0.5。
-4. actionable 不得编造 SN/订单号等未出现字段。
-5. 信息不足以判定时 responsible_party 填"无法判定"。
+2. evidence 必须是原文摘录（工单原文或"凭证图片理解"原文），不得推断事实。
+3. 若提供了"凭证图片理解"，可将其作为证据补充；有清晰图片佐证时可适当提高 confidence，无图片佐证时不得凭空提高。
+4. needs_more_evidence=true 时 confidence 必须 ≤ 0.5。
+5. actionable 不得编造 SN/订单号等未出现字段。
+6. 信息不足以判定时 responsible_party 填"无法判定"。
 
 仅输出 JSON 对象本身。"""
 
@@ -159,7 +162,7 @@ def load_cache():
 
 
 def save_result(ticket_id, result):
-    """写缓存时强制注入 id，保证下游能关联（本次关键修复）"""
+    """写缓存时强制注入 id，保证下游能关联"""
     cache = load_cache()
     saved = {"id": ticket_id}
     if isinstance(result, dict):
@@ -180,6 +183,13 @@ def attribute(ticket, model="qwen-plus", use_cache=True):
             print(f"  [缓存命中] {ticket['id']}", file=sys.stderr)
             return cached
 
+    # —— 图片理解：仅当工单声明有凭证图且能解析到路径时才调用，否则优雅跳过 ——
+    img_desc = None
+    img_path = ticket.get("image_path")
+    if ticket.get("has_image") and img_path:
+        print(f"  [凭证理解] {ticket['id']} -> {img_path}", file=sys.stderr)
+        img_desc = describe_image(img_path, item=ticket.get("item", ""))
+
     content = (
         f"工单ID:{ticket['id']} 商品:{ticket['item']} 价格:{ticket['price']} "
         f"已激活:{ticket.get('activated', False)} 物流:{ticket.get('logistics', '-')}\n"
@@ -187,6 +197,10 @@ def attribute(ticket, model="qwen-plus", use_cache=True):
     )
     for i, msg in enumerate(ticket.get("chat", []), 1):
         content += f"  {i}. {msg}\n"
+    if img_desc:
+        content += f"凭证图片理解:{img_desc}\n"
+    elif ticket.get("has_image"):
+        content += "凭证图片理解:（买家声称有凭证但图片缺失或不可识别）\n"
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -209,7 +223,9 @@ def attribute(ticket, model="qwen-plus", use_cache=True):
         if not ok:
             result["_warn"] = msg
 
-    result["id"] = ticket["id"]   # 兜底：返回对象一定带 id
+    result["id"] = ticket["id"]
+    if img_desc:
+        result["_image_desc"] = img_desc   # 留痕：界面可展示图片理解结果
     save_result(ticket["id"], result)
     return result
 

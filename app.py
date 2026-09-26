@@ -52,6 +52,7 @@ st.sidebar.markdown(f"**商品** {ticket['item']}")
 st.sidebar.markdown(f"**售价** ¥{ticket['price']}  /  **进货价** ¥{ticket.get('cost_price', '—')}")
 st.sidebar.markdown(f"**已激活** {'是 ✅' if ticket.get('activated') else '否'}")
 st.sidebar.markdown(f"**物流** {ticket.get('logistics', '-')}")
+st.sidebar.markdown(f"**凭证图片** {'📷 有' if ticket.get('has_image') else '无'}")
 st.sidebar.markdown("---")
 if st.sidebar.button("📊 生成周复盘", use_container_width=True):
     st.session_state.show_review = True
@@ -66,6 +67,13 @@ with col1:
     st.info(ticket["note"], icon="💬")
     for msg in ticket.get("chat", []):
         st.text(msg)
+    if ticket.get("has_image"):
+        img_path = ticket.get("image_path")
+        st.caption("📷 买家上传了退货凭证图片")
+        if img_path and os.path.exists(img_path):
+            st.image(img_path, caption="买家凭证", use_container_width=True)
+        else:
+            st.warning("凭证图片文件缺失（买家声称已上传但无法读取）——这本身就是一个证据风险")
     force = st.checkbox("强制重新计算（忽略缓存）", key="force")
     if st.button("▶ 开始归因", type="primary"):
         with st.spinner("判责中…"):
@@ -87,6 +95,9 @@ with col2:
         pc = out.get("primary_cause") or {}
         conf = pc.get("confidence", 0)
         st.markdown(f"**主因** `{pc.get('level1','')}` / `{pc.get('level2','')}`　置信度 **{conf:.0%}**")
+        if out.get("_image_desc"):
+            with st.expander("📷 凭证图片理解（多模态证据）"):
+                st.markdown(out["_image_desc"])
         if pc.get("evidence"):
             st.markdown("**证据引用**")
             for e in pc["evidence"]:
@@ -138,7 +149,6 @@ if st.session_state.show_review:
     if not rev:
         st.warning("暂无数据，请先对工单执行归因")
     else:
-        # 待补证队列：直接读 jsonl
         pending = []
         tmap = {}
         tp = os.path.join("data", "tickets_seed.jsonl")
