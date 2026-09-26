@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-归因引擎 v4：退货工单 -> 责任方判定 + 证据 + 风险标记
-调用 DashScope Qwen 系列模型，结果缓存到 data/results.jsonl
+归因引擎 v4.1：退货工单 -> 责任方判定 + 证据 + 风险标记
+修复：save_result 强制注入 id，保证下游 review/decision 能关联
 """
 
 import os
@@ -30,8 +30,8 @@ level2 只能选：
 responsible_party 只能选：供应商/仓配/运营/物流商/商家自身/用户/平台规则/无法判定
 
 【字段】
-primary_cause: {level1, level2, evidence: [原文摘录，每条≤20字], confidence: 0~1浮点数}
-secondary_cause: 同结构；若无次因则整个字段为 null
+primary_cause: {level1, level2, evidence: [原文摘录], confidence: 0~1}
+secondary_cause: 同结构；无则 null
 responsible_party: 字符串
 actionable: 一句可执行动作，只能基于工单已有信息
 needs_more_evidence: bool
@@ -39,9 +39,9 @@ ask_user: 需用户补充的信息，无则 null
 risk_flag: 策略性风险描述，无则 null
 
 【判定顺序】
-第一步：判断已有证据能否独立支撑责任方判定。能→证据充分；不能→证据不足。
-第二步：若证据不足，则 needs_more_evidence=true、填 ask_user、confidence ≤ 0.5。
-第三步：若证据充分，则 needs_more_evidence=false、ask_user=null。
+第一步：判断已有证据能否独立支撑责任方判定。
+第二步：证据不足 → needs_more_evidence=true、填 ask_user、confidence ≤ 0.5。
+第三步：证据充分 → needs_more_evidence=false、ask_user=null。
 第四步：填 risk_flag（不影响责任方判定）。
 
 【硬约束】
@@ -55,7 +55,6 @@ risk_flag: 策略性风险描述，无则 null
 
 
 def call_qwen(messages, model="qwen-plus", max_retries=2):
-    """带重试的调用，返回文本或 None"""
     for attempt in range(max_retries + 1):
         try:
             resp = Generation.call(
@@ -67,19 +66,17 @@ def call_qwen(messages, model="qwen-plus", max_retries=2):
             )
             if resp.status_code == 200:
                 return resp.output.choices[0].message.content
-            print(f"  [重试 {attempt + 1}] HTTP {resp.status_code}: {resp.message}", file=sys.stderr)
+            print(f"  [重试 {attempt + 1}] HTTP {resp.status_code}", file=sys.stderr)
         except Exception as e:
-            print(f"  [重试 {attempt + 1}] 异常: {e}", file=sys.stderr)
+            print(f"  [重试 {attempt + 1}] {e}", file=sys.stderr)
         time.sleep(1.5)
     return None
 
 
 def extract_json(text):
-    """从回复中抠出 JSON，容忍 markdown 包裹和前后废话"""
     if not text:
         return None
     text = text.strip()
-    # 去掉 ```json ... ```
     if text.startswith("```"):
         lines = text.split("\n")
         if lines[0].startswith("```"):
@@ -97,7 +94,6 @@ def extract_json(text):
 
 
 def validate(result):
-    """最小 schema 校验，返回 (ok, msg)"""
     if not isinstance(result, dict):
         return False, "结果不是对象"
     required = ["primary_cause", "responsible_party", "actionable", "needs_more_evidence"]
@@ -122,7 +118,6 @@ def validate(result):
 
 
 def repair(result):
-    """自动修复常见毛病，保证下游不崩；修复动作留痕"""
     fixed = []
     if not isinstance(result, dict):
         return result
@@ -157,15 +152,21 @@ def load_cache():
                 line = line.strip()
                 if line:
                     obj = json.loads(line)
-                    cache[obj["id"]] = obj
+                    cache[obj.get("id", "_unknown")] = obj
     except Exception:
         return {}
     return cache
 
 
 def save_result(ticket_id, result):
+    """写缓存时强制注入 id，保证下游能关联（本次关键修复）"""
     cache = load_cache()
-    cache[ticket_id] = result
+    saved = {"id": ticket_id}
+    if isinstance(result, dict):
+        saved.update({k: v for k, v in result.items() if k != "id"})
+    else:
+        saved.update({"_raw": str(result), "_error": "结果不是对象"})
+    cache[ticket_id] = saved
     os.makedirs("data", exist_ok=True)
     with open(CACHE_PATH, "w", encoding="utf-8") as f:
         for v in cache.values():
@@ -173,7 +174,6 @@ def save_result(ticket_id, result):
 
 
 def attribute(ticket, model="qwen-plus", use_cache=True):
-    """归因主入口"""
     if use_cache:
         cached = load_cache().get(ticket["id"])
         if cached:
@@ -195,9 +195,8 @@ def attribute(ticket, model="qwen-plus", use_cache=True):
 
     raw = call_qwen(messages, model=model)
 
-    # 调试：如果拿不到内容，把原始回复打印出来，方便定位
     if raw is None:
-        err = {"_raw": None, "_error": "模型未返回内容（检查 API Key / 网络 / 额度）"}
+        err = {"_raw": None, "_error": "模型未返回内容"}
         save_result(ticket["id"], err)
         return err
 
@@ -210,6 +209,7 @@ def attribute(ticket, model="qwen-plus", use_cache=True):
         if not ok:
             result["_warn"] = msg
 
+    result["id"] = ticket["id"]   # 兜底：返回对象一定带 id
     save_result(ticket["id"], result)
     return result
 
