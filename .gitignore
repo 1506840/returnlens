@@ -1,4 +1,13 @@
-.env
+# 虚拟环境
 venv/
+.env                 # 重点！忽略 .env密钥文件,不提交到git
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# streamlit缓存
+.streamlit/
+
+# 日志、临时文件
+*.log
