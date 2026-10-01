@@ -7,6 +7,7 @@ ResearchLens · 研究进展追踪 v1.0
 """
 
 import os
+import re
 import json
 from taxonomy import GAP_TYPE_LIST, GAP_SUBTYPE_MAP
 
@@ -14,6 +15,7 @@ from taxonomy import GAP_TYPE_LIST, GAP_SUBTYPE_MAP
 SEED_PATH = os.path.join("data", "lit_seed.jsonl")
 MINING_PATH = os.path.join("data", "mining_results.jsonl")
 HYPOTHESIS_PATH = os.path.join("data", "hypotheses.jsonl")
+CHART_FINDINGS_PATH = os.path.join("data", "chart_findings.json")
 
 
 def load_papers():
@@ -55,6 +57,41 @@ def load_hypotheses():
                 obj = json.loads(line)
                 results[obj.get("cache_key")] = obj.get("hypotheses", [])
     return results
+
+
+def load_chart_findings():
+    """加载图表理解结论（data/chart_findings.json，由 UI 离线缓存，不触发 API）"""
+    if not os.path.exists(CHART_FINDINGS_PATH):
+        return {}
+    try:
+        with open(CHART_FINDINGS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def dedup_hypotheses(hypotheses_by_key, budget_days=None):
+    """同一论文可能缓存多个预算变体（cache_key=<paper_id>_budget<N>），
+    按 paper_id 去重，避免研究全景重复计数（H3）。
+    优先采用与 budget_days 匹配的变体；否则保留通过门控数最多的变体。
+    """
+    groups = {}
+    for key, hyps in hypotheses_by_key.items():
+        pid = re.sub(r"_budget\d+$", "", key) or key
+        groups.setdefault(pid, {})[key] = hyps
+    chosen = []
+    for pid, variants in groups.items():
+        if budget_days is not None:
+            match_key = f"{pid}_budget{budget_days}"
+            if match_key in variants:
+                chosen.extend(variants[match_key])
+                continue
+        best_key = max(
+            variants,
+            key=lambda k: sum(1 for h in variants[k] if h.get("gate_passed")),
+        )
+        chosen.extend(variants[best_key])
+    return chosen
 
 
 def count_gaps(mining_results):
@@ -196,7 +233,7 @@ def build_sensitivity(gap_summary, hyp_summary):
     )
 
 
-def track(verbose=True):
+def track(verbose=True, budget_days=None):
     """主流程：聚合研究进展"""
     papers = load_papers()
     if not papers:
@@ -212,16 +249,21 @@ def track(verbose=True):
             print("❌ 无挖掘结果，请先运行 literature_mining.py")
         return None
 
-    # 收集所有假设
-    all_hyps = []
-    for key, hyps in hypotheses.items():
-        all_hyps.extend(hyps)
+    # 收集所有假设（按 paper_id 去重预算变体，避免重复计数）
+    all_hyps = dedup_hypotheses(hypotheses, budget_days)
 
     # 聚合
     gap_summary = count_gaps(mining)
     hyp_summary = summarize_hypotheses(all_hyps)
     conclusion = build_conclusion(gap_summary, hyp_summary)
     sensitivity = build_sensitivity(gap_summary, hyp_summary)
+
+    # 图表理解结论（离线读取 UI 缓存，不触发 API）
+    chart_findings = load_chart_findings()
+    chart_summary = {
+        "figures": len(chart_findings),
+        "discrepancies": sum(v.get("n_discrepancies", 0) for v in chart_findings.values()),
+    }
 
     # 待补证清单（低置信度空白）
     pending = gap_summary["low_confidence"]
@@ -234,6 +276,7 @@ def track(verbose=True):
         "pending": pending,
         "conclusion": conclusion,
         "sensitivity": sensitivity,
+        "chart_summary": chart_summary,
     }
 
 

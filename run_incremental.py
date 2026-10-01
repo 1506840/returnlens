@@ -103,6 +103,12 @@ def main():
     # 5. 按种子顺序回写
     write_jsonl(MINING_RES, merged, seed_order)
 
+    # 5b. 同步冻结基线：将本次合并结果写入 mining_frozen.jsonl，
+    #     作为后续增量运行的不可变兜底，真正实现"零漂移 / 可复现"。
+    #     此后未指定 --force 时，已冻结的论文直接复用，结果恒定一致。
+    write_jsonl(FROZEN, merged, seed_order)
+    print(f"   冻结基线已更新: {FROZEN}（{len(merged)} 篇）")
+
     print(f"\n✅ 完成：沿用冻结 {len(frozen)} 篇，新增/更新 {len(targets)} 篇")
     print(f"   结果已写入 {MINING_RES}")
 
