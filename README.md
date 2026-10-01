@@ -27,10 +27,10 @@ ResearchLens 是一套**科研认知增强流水线**：把研究者需要数天
 
 | 科研模块 | 源模块（电商归因系统） | 复用率 | 核心改造 |
 |---|---|---|---|
-| **文献挖掘** `literature_mining.py` | `attribution.py` | ~70% | 五元组抽取 + 研究空白发现 + quote 命中校验 |
-| **假设生成** `hypothesis_generator.py` | `decision.py` | ~55% | 多维可行性评分 + 门控拦截 + 敏感性分析 |
-| **进展追踪** `research_tracker.py` | `review.py` | ~80% | 纯本地聚合 + 按空白类型分支给建议 |
-| **图表理解** `chart_understanding.py` | `vision.py` | ~85% | 科学图表数值提取 + 图文矛盾检测 |
+| **文献挖掘** `literature_mining.py` | `legacy/attribution.py` | ~70% | 五元组抽取 + 研究空白发现 + quote 命中校验 |
+| **假设生成** `hypothesis_generator.py` | `legacy/decision.py` | ~55% | 多维可行性评分 + 门控拦截 + 敏感性分析 |
+| **进展追踪** `research_tracker.py` | `legacy/review.py` | ~80% | 纯本地聚合 + 按空白类型分支给建议 |
+| **图表理解** `chart_understanding.py` | `legacy/vision.py` | ~85% | 科学图表数值提取 + 图文矛盾检测 |
 
 ### 关键设计
 
@@ -67,8 +67,8 @@ ResearchLens 是一套**科研认知增强流水线**：把研究者需要数天
 
 | 组件 | 方案 | 理由 |
 |---|---|---|
-| 基座模型 | Qwen-Max / Qwen-Plus（百炼 API） | 长上下文 + 智能体能力最强 |
-| 多模态 | Qwen-VL-Max | 科学图表理解能力强 |
+| 基座模型 | qwen-plus（百炼 API，环境变量 `DASHSCOPE_TEXT_MODEL` 可覆盖为 qwen-max） | 长上下文 + 智能体能力；默认 Plus 兼顾成本，答辩可切 Max |
+| 多模态 | qwen-vl-plus（环境变量 `DASHSCOPE_VL_MODEL` 可覆盖为 qwen-vl-max） | 科学图表理解能力强 |
 | 界面 | Streamlit | 快速原型 + 无 pandas 依赖（DLL 限制） |
 | 数据 | JSONL 缓存 | 零漂移 + 断网可演示 |
 
@@ -88,6 +88,13 @@ ResearchLens 是一套**科研认知增强流水线**：把研究者需要数天
 ## 快速启动
 
 ```bash
+# 0. 安装依赖（首次运行）
+pip install -r requirements.txt
+
+# 配置密钥：在项目根目录创建 .env，写入
+#   DASHSCOPE_API_KEY=你的百炼API密钥
+# （.env 已在 .gitignore 中，不会进入版本库）
+
 # 1. 文献挖掘（读取论文 → 抽取五元组 + 发现空白）
 python literature_mining.py
 
@@ -109,12 +116,13 @@ python research_tracker.py
 
 ```
 researchlens/
-├── llm.py                       # LLM 调用公共层（文本 + 多模态）
+├── llm.py                       # LLM 调用公共层（文本 + 多模态，含模型常量与超时）
 ├── taxonomy.py                  # 科研本体论（封闭枚举，唯一真源）
+├── io_jsonl.py                  # JSONL 读写公共层（M-B 统一真源）
 ├── literature_mining.py         # 文献挖掘引擎
 ├── hypothesis_generator.py      # 假设生成引擎
 ├── research_tracker.py          # 研究进展追踪
-├── chart_understanding.py       # 科学图表理解
+├── chart_understanding.py       # 科学图表理解（5 类图文矛盾检测）
 ├── run_incremental.py           # 增量挖掘脚本
 ├── app.py                       # Streamlit 界面
 ├── data/
@@ -122,7 +130,8 @@ researchlens/
 │   ├── papers/                  # 论文全文（预抽取，演示零联网）
 │   ├── mining_results.jsonl     # 挖掘结果缓存
 │   ├── hypotheses.jsonl         # 假设结果缓存
-│   └── chart_cache.json         # 图表理解缓存
+│   └── chart_findings.json       # 图表理解结论缓存（UI 层写入，唯一缓存）
+├── legacy/                      # 旧电商客服归因系统（已停用，仅供溯源）
 ├── test_*.py                    # Mock 测试（不依赖 API）
 └── README.md
 ```

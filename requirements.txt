@@ -1,0 +1,5 @@
+# ResearchLens 运行依赖
+# 需要 Python >= 3.10
+streamlit>=1.30
+dashscope>=1.27.7
+python-dotenv>=1.0
