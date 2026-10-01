@@ -8,7 +8,7 @@ ResearchLens · 假设生成引擎 v1.0
 import json
 import sys
 import os
-from llm import call_qwen, extract_json, API_KEY
+from llm import call_qwen, extract_json, API_KEY, TEXT_MODEL
 from taxonomy import (
     HYPOTHESIS_KINDS,
     RESOURCE_TAGS,
@@ -310,7 +310,7 @@ def repair(hypothesis):
     return hypothesis
 
 
-def generate(mining_result, budget_days=30, model="qwen-max", use_cache=True, on_progress=None):
+def generate(mining_result, budget_days=30, model=TEXT_MODEL, use_cache=True, on_progress=None):
     """基于文献挖掘结果生成假设
     
     Args:

@@ -9,7 +9,7 @@ import os
 import sys
 import json
 
-from llm import call_qwen, extract_json, API_KEY
+from llm import call_qwen, extract_json, API_KEY, TEXT_MODEL
 from taxonomy import GAP_TYPE_LIST, GAP_SUBTYPE_MAP
 
 # ── 路径常量 ──────────────────────────────────────────────────
@@ -285,7 +285,7 @@ def save_result(paper_id, result):
 
 
 # ── 主流程 ────────────────────────────────────────────────────
-def mine(paper, model="qwen-plus", use_cache=True, on_progress=None):
+def mine(paper, model=TEXT_MODEL, use_cache=True, on_progress=None):
     """对单篇论文执行文献挖掘，返回结构化结果。
 
     on_progress: 可选回调 fn(phase, message, data=None)，在真实里程碑点上报，

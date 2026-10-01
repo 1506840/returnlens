@@ -9,37 +9,22 @@
 import json
 import os
 import re
-import hashlib
 import base64
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from llm import call_qwen_multimodal, extract_json
-from taxonomy import CHART_TYPES, DISCREPANCY_TYPES
+from llm import call_qwen_multimodal, extract_json, VL_MODEL
+from taxonomy import CHART_TYPES
 
-# 缓存路径
-CACHE_PATH = Path("data") / "chart_cache.json"
+# 缓存策略（H-B 统一）：图表理解结论的唯一缓存由 UI 层写入 data/chart_findings.json
+# （app.py 的 _save_chart_finding / research_tracker.load_chart_findings 共用），
+# 引擎保持无状态，不再维护第二份 chart_cache.json，避免双缓存冗余。
 
 
 def encode_image_to_base64(image_path: str) -> str:
     """将图片文件编码为 base64 字符串"""
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
-
-
-def load_cache() -> Dict:
-    """加载图表理解缓存"""
-    if not CACHE_PATH.exists():
-        return {}
-    with open(CACHE_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_cache(cache: Dict):
-    """保存图表理解缓存"""
-    CACHE_PATH.parent.mkdir(exist_ok=True)
-    with open(CACHE_PATH, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
 def extract_chart_data(chart_image: str, chart_type: str = None) -> Optional[Dict]:
@@ -56,18 +41,7 @@ def extract_chart_data(chart_image: str, chart_type: str = None) -> Optional[Dic
     if not os.path.exists(chart_image):
         print(f"  [警告] 图表文件不存在: {chart_image}")
         return None
-    
-    # 生成缓存 key
-    with open(chart_image, "rb") as f:
-        file_hash = hashlib.md5(f.read()).hexdigest()
-    cache_key = f"{file_hash}_{chart_type or 'auto'}"
-    
-    # 检查缓存
-    cache = load_cache()
-    if cache_key in cache:
-        print(f"  [缓存命中] {chart_image}")
-        return cache[cache_key]
-    
+
     # 编码图片
     image_base64 = encode_image_to_base64(chart_image)
     
@@ -105,7 +79,7 @@ def extract_chart_data(chart_image: str, chart_type: str = None) -> Optional[Dic
         response = call_qwen_multimodal(
             image_base64=image_base64,
             prompt=prompt,
-            model="qwen-vl-plus"
+            model=VL_MODEL
         )
         
         if not response:
@@ -118,10 +92,7 @@ def extract_chart_data(chart_image: str, chart_type: str = None) -> Optional[Dic
             print(f"  [警告] JSON 解析失败")
             return None
         
-        # 存入缓存
-        cache[cache_key] = result
-        save_cache(cache)
-        
+        # 解析成功（结论由 UI 层缓存到 data/chart_findings.json，引擎无状态）
         print(f"  [提取成功] 从 {chart_image} 提取了 {len(result.get('data_points', []))} 个数据点")
         return result
         
@@ -226,8 +197,98 @@ def detect_discrepancy(
                         }
                     }
                     discrepancies.append(discrepancy)
-    
+
+    # ── 补全 taxonomy.DISCREPANCY_TYPES 声明的其余 3 类（H-B）──
+    _detect_label_mismatch(chart_data, paper_claims, discrepancies)
+    _detect_missing_data(chart_data, paper_claims, discrepancies)
+    _detect_scale_mismatch(chart_data, paper_claims, discrepancies)
+
     return discrepancies
+
+
+# ── 以下 3 个检测器补全 taxonomy.DISCREPANCY_TYPES 的剩余类型（H-B）──
+# 均为保守启发式：只在论文有显式措辞/数值时才上报，最大限度避免误报。
+_AXIS_PAT = re.compile(
+    r"(横轴|纵轴|x\s*轴|y\s*轴|图例|坐标轴)\s*(表示|是|为|:|：)?\s*([一-龥A-Za-z0-9_%/．.\d]+)"
+)
+_MULT_PAT = re.compile(r"(\d+(?:\.\d+)?)\s*(倍|×|x|fold|倍于)", re.IGNORECASE)
+_METRIC_KW = ["准确率", "精度", "召回率", "recall", "precision", "f1", "ap",
+              "损失", "loss", "auc", "bleu", "误差", "error", "mae", "rmse", "acc"]
+
+
+def _detect_label_mismatch(chart_data, claims, out):
+    """论文显式指称某个轴/标签，但图表轴标签与数据标签中都没有该名称。"""
+    chart_labels = set()
+    axes = chart_data.get("axes") or {}
+    for lab in (axes.get("x_label"), axes.get("y_label")):
+        if lab:
+            chart_labels.add(str(lab).strip().lower())
+    for p in chart_data.get("data_points", []):
+        if p.get("label"):
+            chart_labels.add(str(p["label"]).strip().lower())
+    for claim in claims:
+        for m in _AXIS_PAT.finditer(claim):
+            mentioned = m.group(3).strip().lower()
+            if mentioned and mentioned not in chart_labels:
+                out.append({
+                    "type": "label_mismatch",
+                    "description": f"论文指称『{mentioned}』，但图表轴标签/数据标签中未出现该名称",
+                    "paper_claim": claim,
+                    "mentioned_label": mentioned,
+                    "chart_labels": sorted(chart_labels),
+                })
+
+
+def _detect_missing_data(chart_data, claims, out):
+    """论文引用了某指标的具体数值，但图表中既无对应标签也无该数值（数据缺失）。"""
+    labels_lower = [str(p.get("label", "")).lower() for p in chart_data.get("data_points", [])]
+    values = [p.get("value") for p in chart_data.get("data_points", [])
+              if isinstance(p.get("value"), (int, float))]
+    for claim in claims:
+        cl = claim.lower()
+        hit_kw = next((k for k in _METRIC_KW if k in cl), None)
+        if not hit_kw:
+            continue
+        nums = re.findall(r"(?<![a-zA-Z])(\d+\.?\d*)", claim)
+        claimed_vals = [float(n) for n in nums]
+        label_present = any(hit_kw in lab for lab in labels_lower)
+        val_present = bool(values and claimed_vals) and any(
+            abs(cv - v) / max(abs(cv), 1e-9) < 0.05
+            for cv in values for v in claimed_vals
+        )
+        if not label_present and not val_present:
+            out.append({
+                "type": "missing_data",
+                "description": f"论文引用了『{hit_kw}』相关数据，但图表中既无对应标签也无该数值",
+                "paper_claim": claim,
+                "metric": hit_kw,
+            })
+
+
+def _detect_scale_mismatch(chart_data, claims, out):
+    """论文声称的倍数变化与图表实际数据比例不符。"""
+    vals = [p.get("value") for p in chart_data.get("data_points", [])
+            if isinstance(p.get("value"), (int, float)) and p.get("value", 0) > 0]
+    if len(vals) < 2:
+        return
+    chart_ratio = max(vals) / min(vals)
+    for claim in claims:
+        for m in _MULT_PAT.finditer(claim):
+            try:
+                claimed_ratio = float(m.group(1))
+            except ValueError:
+                continue
+            if claimed_ratio <= 0:
+                continue
+            diff = abs(claimed_ratio - chart_ratio) / max(claimed_ratio, chart_ratio)
+            if diff > 0.5:
+                out.append({
+                    "type": "scale_mismatch",
+                    "description": f"论文声称变化约 {claimed_ratio} 倍，但图表数据比例约 {chart_ratio:.1f} 倍",
+                    "paper_claim": claim,
+                    "claimed_ratio": claimed_ratio,
+                    "chart_ratio": round(chart_ratio, 2),
+                })
 
 
 # extract_json 已统一到 llm.py（M1）：from llm import extract_json
