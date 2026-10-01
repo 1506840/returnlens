@@ -16,6 +16,7 @@ ResearchLens · 答辩模式离线自检（preflight）
 import json
 import os
 import re
+from io_jsonl import read_jsonl
 
 SEED_PATH = os.path.join("data", "lit_seed.jsonl")
 MINING_PATH = os.path.join("data", "mining_results.jsonl")
@@ -32,18 +33,8 @@ def _norm(s):
 
 
 def _load_jsonl(path, key):
-    out = {}
-    if not os.path.exists(path):
-        return out
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                o = json.loads(line)
-                k = o.get(key)
-                if k:
-                    out[k] = o
-    return out
+    # 统一走 io_jsonl（M-B）
+    return read_jsonl(path, key=key)
 
 
 def run_preflight():

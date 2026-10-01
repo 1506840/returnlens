@@ -11,6 +11,7 @@ import json
 
 from llm import call_qwen, extract_json, API_KEY, TEXT_MODEL
 from taxonomy import GAP_TYPE_LIST, GAP_SUBTYPE_MAP
+from io_jsonl import read_jsonl, write_jsonl
 
 # ── 路径常量 ──────────────────────────────────────────────────
 SEED_PATH = os.path.join("data", "lit_seed.jsonl")
@@ -255,19 +256,8 @@ def check_quote_hits(result, full_text):
 
 # ── 缓存 ──────────────────────────────────────────────────────
 def load_cache():
-    if not os.path.exists(CACHE_PATH):
-        return {}
-    cache = {}
-    try:
-        with open(CACHE_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    obj = json.loads(line)
-                    cache[obj.get("paper_id", "_unknown")] = obj
-    except Exception:
-        return {}
-    return cache
+    # 统一走 io_jsonl（M-B）
+    return read_jsonl(CACHE_PATH, key="paper_id")
 
 
 def save_result(paper_id, result):
@@ -278,10 +268,7 @@ def save_result(paper_id, result):
     else:
         saved.update({"_raw": str(result), "_error": "结果不是对象"})
     cache[paper_id] = saved
-    os.makedirs("data", exist_ok=True)
-    with open(CACHE_PATH, "w", encoding="utf-8") as f:
-        for v in cache.values():
-            f.write(json.dumps(v, ensure_ascii=False) + "\n")
+    write_jsonl(CACHE_PATH, cache.values())
 
 
 # ── 主流程 ────────────────────────────────────────────────────

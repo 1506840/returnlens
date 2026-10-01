@@ -10,6 +10,7 @@ import os
 import re
 import json
 from taxonomy import GAP_TYPE_LIST, GAP_SUBTYPE_MAP
+from io_jsonl import read_jsonl
 
 # ── 路径常量 ──────────────────────────────────────────────────
 SEED_PATH = os.path.join("data", "lit_seed.jsonl")
@@ -19,44 +20,19 @@ CHART_FINDINGS_PATH = os.path.join("data", "chart_findings.json")
 
 
 def load_papers():
-    """加载种子论文列表"""
-    if not os.path.exists(SEED_PATH):
-        return []
-    papers = []
-    with open(SEED_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                papers.append(json.loads(line))
-    return papers
+    """加载种子论文列表（统一走 io_jsonl，M-B）"""
+    return read_jsonl(SEED_PATH)
 
 
 def load_mining_results():
-    """加载文献挖掘结果"""
-    if not os.path.exists(MINING_PATH):
-        return {}
-    results = {}
-    with open(MINING_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                obj = json.loads(line)
-                results[obj.get("paper_id")] = obj
-    return results
+    """加载文献挖掘结果（统一走 io_jsonl，M-B）"""
+    return read_jsonl(MINING_PATH, key="paper_id")
 
 
 def load_hypotheses():
-    """加载假设生成结果"""
-    if not os.path.exists(HYPOTHESIS_PATH):
-        return {}
-    results = {}
-    with open(HYPOTHESIS_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                obj = json.loads(line)
-                results[obj.get("cache_key")] = obj.get("hypotheses", [])
-    return results
+    """加载假设生成结果（返回 {cache_key: 假设列表}）"""
+    raw = read_jsonl(HYPOTHESIS_PATH, key="cache_key")
+    return {k: obj.get("hypotheses", []) for k, obj in raw.items()}
 
 
 def load_chart_findings():

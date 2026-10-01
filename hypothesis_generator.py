@@ -9,6 +9,7 @@ import json
 import sys
 import os
 from llm import call_qwen, extract_json, API_KEY, TEXT_MODEL
+from io_jsonl import read_jsonl, write_jsonl
 from taxonomy import (
     HYPOTHESIS_KINDS,
     RESOURCE_TAGS,
@@ -446,30 +447,17 @@ def generate(mining_result, budget_days=30, model=TEXT_MODEL, use_cache=True, on
 
 
 def load_cache():
-    """加载缓存"""
-    if not os.path.exists(CACHE_PATH):
-        return {}
-    
-    cache = {}
-    with open(CACHE_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            obj = json.loads(line)
-            cache_key = obj.get("cache_key")
-            if cache_key:
-                cache[cache_key] = obj.get("hypotheses", [])
-    
-    return cache
+    """加载缓存（返回 {cache_key: 假设列表}）"""
+    raw = read_jsonl(CACHE_PATH, key="cache_key")
+    return {k: obj.get("hypotheses", []) for k, obj in raw.items()}
 
 
 def save_cache(cache_key, hypotheses):
-    """保存缓存"""
+    """保存缓存（统一走 io_jsonl，M-B）"""
     cache = load_cache()
     cache[cache_key] = hypotheses
-    
-    with open(CACHE_PATH, "w", encoding="utf-8") as f:
-        for key, hyps in cache.items():
-            obj = {"cache_key": key, "hypotheses": hyps}
-            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    out = [{"cache_key": k, "hypotheses": hyps} for k, hyps in cache.items()]
+    write_jsonl(CACHE_PATH, out)
 
 
 def print_hypothesis(hyp):
