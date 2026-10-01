@@ -18,6 +18,8 @@ from research_tracker import (
     track, load_papers, load_mining_results, load_hypotheses,
     count_gaps, summarize_hypotheses
 )
+from llm import TEXT_MODEL, VL_MODEL
+from taxonomy import SCORE_WEIGHTS
 
 # 图表理解结论缓存（UI 离线写入，全景页只读，不触发 API）
 CHART_FINDINGS_PATH = os.path.join("data", "chart_findings.json")
@@ -242,7 +244,14 @@ def conf_badge(conf):
 
 
 def html_escape(s):
-    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # 转义 & < > 以及引号，防止 LLM 文本注入 HTML 属性（L-A）。
+    # 自包含实现，避免依赖顶层 import，便于测试以 exec 片段方式复用本函数。
+    s = str(s)
+    return (s.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;")
+             .replace('"', "&quot;")
+             .replace("'", "&#x27;"))
 
 
 def index_gaps(mining_out):
@@ -503,8 +512,8 @@ st.markdown(
                  基于 Qwen 的科研假设生成系统 · 认知增强与研发范式革新</div>
         </div>
         <div style="font-size:12px;color:{THEME['muted']}">
-            <span class="rl-badge purple">Qwen-Max</span>
-            <span class="rl-badge green">Qwen-VL-Max</span>
+            <span class="rl-badge purple">{html_escape(TEXT_MODEL)}</span>
+            <span class="rl-badge green">{html_escape(VL_MODEL)}</span>
             <span class="rl-badge gray">百炼 API</span>
         </div>
     </div>
@@ -799,8 +808,6 @@ with tab_hyp:
 
             DIM_CN = {"novelty": "新颖性", "feasibility": "可行性",
                       "impact": "影响力", "evidence_strength": "证据强度"}
-            DIM_W = {"novelty": 0.30, "feasibility": 0.30,
-                     "impact": 0.25, "evidence_strength": 0.15}
 
             gap_idx = index_gaps(out)
 
@@ -843,7 +850,7 @@ with tab_hyp:
                     bars += (
                         f'<div style="margin:7px 0">'
                         f'<div style="display:flex;justify-content:space-between;font-size:12px">'
-                        f'<span>{DIM_CN[dim]} <span style="color:#B2BEC3">×{int(DIM_W[dim]*100)}%</span></span>'
+                        f'<span>{DIM_CN[dim]} <span style="color:#B2BEC3">×{int(SCORE_WEIGHTS[dim]*100)}%</span></span>'
                         f'<span><b>{val:.2f}</b></span></div>'
                         f'<div class="rl-bar-track"><div class="rl-bar-fill" style="width:{w}%"></div></div>'
                         f'<div style="font-size:11px;color:{THEME["muted"]};margin-top:2px">{html_escape(ev)}</div></div>'
@@ -1047,8 +1054,8 @@ with tab_pan:
 
 # ---------- Tab 5：图表理解（多模态） ----------
 with tab_chart:
-    st.markdown("#### 📊 科学图表理解（多模态 · Qwen-VL）")
-    st.caption("用 Qwen-VL 提取图表数值，并检测论文声明与图表数据是否矛盾 —— 认知增强：让机器替你核对图文一致性")
+    st.markdown(f"#### 📊 科学图表理解（多模态 · {VL_MODEL}）")
+    st.caption("用 Qwen-VL 提取图表数值，并检测论文声明与图表数据是否矛盾（支持 5 类：数值不匹配 / 趋势矛盾 / 数据缺失 / 尺度矛盾 / 标签矛盾）—— 认知增强：让机器替你核对图文一致性")
     figs_dir = Path("data/figures")
     figs = sorted(
         [f for f in figs_dir.glob("*") if f.suffix.lower() in (".png", ".jpg", ".jpeg")]
