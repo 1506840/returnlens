@@ -24,6 +24,47 @@ from taxonomy import SCORE_WEIGHTS
 # 图表理解结论缓存（UI 离线写入，全景页只读，不触发 API）
 CHART_FINDINGS_PATH = os.path.join("data", "chart_findings.json")
 
+# 提效量化对照卡的透明基准（M-D）
+# 人工基线为透明估算，可在答辩手卡记录真实值；系统耗时优先读取实测演示计时。
+MANUAL_HOURS_PER_PAPER = 2.5   # 估算：人工精读全文+定位空白+构思假设 ≈ 2.5 人时/篇
+MANUAL_HOURS_PER_HYP = 6.5     # 估算：人工产出 1 条可验证假设 ≈ 6-7 人时
+DEMO_TIMINGS_PATH = os.path.join("data", "demo_timings.json")
+
+
+def _system_minutes_per_paper():
+    """系统耗时（分钟/篇）：优先读取实测演示计时 data/demo_timings.json，否则返回估算值。
+
+    返回 (minutes: float, measured: bool)。demo_timings.json 示例：
+    {"mine_seconds": 180, "generate_seconds": 540}
+    """
+    if os.path.exists(DEMO_TIMINGS_PATH):
+        try:
+            with open(DEMO_TIMINGS_PATH, "r", encoding="utf-8") as f:
+                t = json.load(f)
+            secs = float(t.get("mine_seconds", 0)) + float(t.get("generate_seconds", 0))
+            if secs > 0:
+                return secs / 60.0, True
+        except Exception:
+            pass
+    return 12.0, False  # 估算：一次挖掘+生成 ≈ 12 分钟（缓存命中后聚合为秒级）
+
+
+def _track_with_cache(budget_days):
+    """研究全景聚合的轻量会话缓存（L-C）：数据文件变动即失效，避免 4 篇规模下每帧重算。"""
+    paths = [research_tracker.SEED_PATH, research_tracker.MINING_PATH,
+             research_tracker.HYPOTHESIS_PATH, research_tracker.CHART_FINDINGS_PATH]
+    try:
+        mtime = max((os.path.getmtime(p) for p in paths if os.path.exists(p)), default=0)
+    except OSError:
+        mtime = 0
+    key = (budget_days, mtime)
+    cache = st.session_state.get("_track_cache")
+    if cache and cache[0] == key:
+        return cache[1]
+    res = track(verbose=False, budget_days=budget_days)
+    st.session_state._track_cache = (key, res)
+    return res
+
 
 def _load_chart_findings():
     if os.path.exists(CHART_FINDINGS_PATH):
@@ -892,7 +933,7 @@ with tab_hyp:
 
 # ---------- Tab 4：研究全景 ----------
 with tab_pan:
-    result = track(verbose=False, budget_days=budget_days)
+    result = _track_with_cache(budget_days)
     if not result:
         st.info("暂无数据 — 请先对论文执行文献挖掘（结果会缓存到 data/mining_results.jsonl）")
     else:
@@ -932,13 +973,14 @@ with tab_pan:
         n_papers = result["mined"]
         n_gaps = gs["total"]
         n_hyps = hs["total"]
-        manual_hours = n_papers * 2.5  # 估算：每篇人工精读+找空白+构思假设 ≈ 2.5 人时
-        manual_hyp_hours = n_hyps / 0.15 if n_hyps else 0  # 人工 ≈ 6-7 人时/条可验证假设
-        sys_minutes = 12  # 演示：一次挖掘+生成约 12 分钟（缓存命中后聚合为秒级）
+        # 人工基线：透明估算（可在答辩手卡记录真实值）
+        manual_hours = n_papers * MANUAL_HOURS_PER_PAPER
+        manual_hyp_hours = n_hyps * MANUAL_HOURS_PER_HYP
+        sys_minutes, sys_measured = _system_minutes_per_paper()
         speedup = (manual_hours * 60 / sys_minutes) if sys_minutes else 0
         eff_html = (
             f'<div class="rl-card" style="border-left:5px solid {THEME["warn"]};margin-top:14px">'
-            f'<div style="font-size:14px;font-weight:800;margin-bottom:8px">⚡ 提效量化对照（估算）</div>'
+            f'<div style="font-size:14px;font-weight:800;margin-bottom:8px">⚡ 提效量化对照（{"实测" if sys_measured else "估算"}）</div>'
             f'<div style="display:flex;gap:14px">'
             f'<div style="flex:1;background:#F7F8FA;border-radius:10px;padding:10px 12px">'
             f'<div style="font-size:12px;color:{THEME["muted"]}">👤 人工方式（{n_papers} 篇）</div>'
@@ -954,7 +996,8 @@ with tab_pan:
             f'</div></div>'
             f'<div style="font-size:12px;color:{THEME["muted"]};margin-top:8px">'
             f'本次从 {n_papers} 篇论文自动发现 {n_gaps} 个研究空白、生成 {n_hyps} 条候选假设；'
-            f'人工等效耗时约为系统的 <b>{speedup:.0f}×</b>（按人工 2.5 人时/篇估算，含构思）。'
+            f'人工等效耗时约为系统的 <b>{speedup:.0f}×</b>'
+            f'（{"实测演示计时" if sys_measured else "按人工 2.5 人时/篇 + 6.5 人时/条假设估算，含构思"}）。'
             f'</div></div>'
         )
         st.markdown(eff_html, unsafe_allow_html=True)
