@@ -1,0 +1,74 @@
+[
+  {
+    "paper_id": "llava15",
+    "arxiv_id": "2310.03744",
+    "file": "data/figures/llava15_1.jpg",
+    "orig": "extreme_ironing.jpg",
+    "bytes": 62587,
+    "caption": "% % Ablation on global context"
+  },
+  {
+    "paper_id": "llava15",
+    "arxiv_id": "2310.03744",
+    "file": "data/figures/llava15_2.jpg",
+    "orig": "fig_tricky_waikiki.jpg",
+    "bytes": 338330,
+    "caption": "Comparison with SoTA methods on 12 benchmarks."
+  },
+  {
+    "paper_id": "llava15",
+    "arxiv_id": "2310.03744",
+    "file": "data/figures/llava15_3.jpeg",
+    "orig": "hawaii_view.jpeg",
+    "bytes": 170607,
+    "caption": "% % Ablation on global context"
+  },
+  {
+    "paper_id": "som",
+    "arxiv_id": "2310.11441",
+    "file": "data/figures/som_1.jpg",
+    "orig": "captcha_som.jpg",
+    "bytes": 105997,
+    "caption": "In Comparison to GPT-4V without SoM, adding mask-guided marks will enhance LLM's ability to make grounded answers."
+  },
+  {
+    "paper_id": "som",
+    "arxiv_id": "2310.11441",
+    "file": "data/figures/som_2.png",
+    "orig": "captcha_som_v2.png",
+    "bytes": 417636,
+    "caption": "In Comparison to GPT-4V without SoM, adding mask-guided marks will enhance LLM's ability to make grounded answers."
+  },
+  {
+    "paper_id": "som",
+    "arxiv_id": "2310.11441",
+    "file": "data/figures/som_3.jpg",
+    "orig": "coffee_som_v2.jpg",
+    "bytes": 106858,
+    "caption": "In Comparison to GPT-4V without SoM, adding mask-guided marks will enhance LLM's ability to make grounded answers."
+  },
+  {
+    "paper_id": "viscot",
+    "arxiv_id": "2403.16999",
+    "file": "data/figures/viscot_1.png",
+    "orig": "dataset_stat.png",
+    "bytes": 341838,
+    "caption": "Visualization results of the"
+  },
+  {
+    "paper_id": "viscot",
+    "arxiv_id": "2403.16999",
+    "file": "data/figures/viscot_2.jpg",
+    "orig": "gqa_example.jpg",
+    "bytes": 126864,
+    "caption": "Examples of five domains covered in the visual CoT dataset, with corresponding question-answer annotations and visual CoT bboxes: chart, text/doc, general VQA, fine-grained understanding, and relation reasoning. The red bounding boxes in the images highlight the critical image regions that provide necessary and related information for answering the questions."
+  },
+  {
+    "paper_id": "viscot",
+    "arxiv_id": "2403.16999",
+    "file": "data/figures/viscot_3.png",
+    "orig": "tokens_vs_acc.png",
+    "bytes": 93821,
+    "caption": "Trade-offs between visual token numbers and average accuracy on the visual CoT benchmark."
+  }
+]

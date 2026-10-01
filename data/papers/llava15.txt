@@ -1,0 +1,49 @@
+Improved Baselines with Visual Instruction Tuning
+Haotian Liu, Chunyuan Li, Yuheng Li, Yong Jae Lee
+University of Wisconsin-Madison / Microsoft Research, Redmond
+arXiv:2310.03744v2 (CVPR 2024 highlight)
+Local extract for ResearchLens seed corpus.
+
+Abstract
+Large multimodal models (LMM) have recently shown encouraging progress with visual instruction tuning. In this paper, we present the first systematic study to investigate the design choices of LMMs in a controlled setting under the LLaVA framework. We show that the fully-connected vision-language connector in LLaVA is surprisingly powerful and data-efficient. With simple modifications to LLaVA, namely, using CLIP-ViT-L-336px with an MLP projection and adding academic-task-oriented VQA data with response formatting prompts, we establish stronger baselines that achieve state-of-the-art across 11 benchmarks. Our final 13B checkpoint uses merely 1.2M publicly available data, and finishes full training in ~1 day on a single 8-A100 node. Furthermore, we present some early exploration of open problems in LMMs, including scaling to higher resolution inputs, compositional capabilities, and model hallucination, etc. We hope this makes state-of-the-art LMM research more accessible.
+
+1 Introduction (key claims)
+LLaVA excels in conversational-style visual reasoning and outperforms later approaches like InstructBLIP on such benchmarks, while InstructBLIP excels in traditional VQA benchmarks demanding single-word or short answers. This work originates from LLaVA and builds a road map from input, model, and data perspectives:
+(1) Scaling to high-resolution image inputs by dividing images into grids; increased resolution improves detailed perception and reduces hallucination.
+(2) Compositional capabilities: training on long-form language reasoning together with shorter visual reasoning can improve writing capability for multimodal questions.
+(3) Data efficiency: randomly downsampling the training mixture by up to 75% does not significantly decrease performance.
+(4) Data scaling: scaling of data granularity in conjunction with model capability is crucial for improved capability without introducing artifacts like hallucination.
+
+3.2 Response Format Prompting
+A single response formatting prompt ("Answer the question using a single word or phrase.") appended to VQA questions lets LLaVA adjust output format per instruction, avoiding ChatGPT post-processing of answers. Merely including VQAv2 in training lifts MME from 809.6 to 1323.8, outperforming InstructBLIP by 111 points.
+
+3.3 Scaling the Data and Model
+Two-layer MLP vision-language connector improves multimodal capability over the original linear projection. Adding academic-task-oriented VQA (OKVQA, A-OKVQA, OCRVQA, TextCaps) plus region-level VQA (Visual Genome, RefCOCO) improves localization of fine-grained visual details. Input resolution scaled to 336^2 via CLIP-ViT-L-336px; LLM scaled to 13B; ShareGPT added. Final model = LLaVA-1.5. Training cost ~2x LLaVA: ~6h pretraining + ~20h instruction tuning on 8xA100.
+
+3.4 Scaling to Higher Resolutions (LLaVA-1.5-HD)
+Existing open-source CLIP encoders cap at 336^2. Instead of positional embedding interpolation (which needs large-scale finetuning and fixes inference resolution), the image is divided into smaller patches at the encoder's native resolution, encoded independently, merged into one large feature map, plus a downsampled global-context feature concatenated. Supports arbitrary resolution while keeping data efficiency. Global context ablation: GQA 62.9 -> 63.8, MME 1425.8 -> 1497.5, MM-Vet 31.9 -> 35.1.
+
+4 Empirical Evaluation
+Evaluated on 12 benchmarks total: VQAv2, GQA, VizWiz, ScienceQA-IMG, TextVQA (academic); POPE, MME-Perception, MMBench (en/cn), SEED-Bench, LLaVA-Bench-in-the-Wild, MM-Vet (instruction-following). LLaVA-1.5 achieves best overall performance despite magnitudes smaller pretraining/instruction-tuning data. Key numbers: LLaVA-1.5-13B VQAv2 80.0, GQA 63.3, TextVQA 61.3, POPE adv 84.5, MME 1531.3, MMBench-en 67.7, MM-Vet 36.1. LLaVA-1.5-13B-HD further improves detail-heavy tasks (OCR in MM-Vet, detailed description).
+
+Emerging properties: generalizes to unseen response format instructions (VizWiz unanswerable 11.1% -> 67.8%); multilingual visual conversation emerges without any multilingual visual instruction finetuning, attributed to ShareGPT; LLaVA-1.5 outperforms Qwen-VL-Chat on MMBench-CN by +7.3% despite no Chinese multimodal tuning.
+
+5 Open Problems in LMMs
+5.1 Data efficiency: with only 50% of samples the model keeps >98% of full-dataset performance; MMBench/ScienceQA/POPE do not decrease at all, suggesting less-is-more potential.
+5.2 Rethinking hallucination: hallucination is significantly reduced when scaling inputs to 448^2. When input resolution is insufficient to discern details present in training data at that granularity, and the amount of such data is large enough, the model *learns* to hallucinate. There must be a balance between richer annotation and model capability at that granularity.
+5.3 Compositional capabilities: correctly answering an object attribute in VQA does not guarantee accurate depiction of that attribute in a whole-image detailed description; some languages (e.g. Korean) still fall behind. Deeper understanding of the mechanism could further improve capability and data efficiency.
+
+6 Conclusion
+Proposes a simple, effective, data-efficient baseline (LLaVA-1.5) and explores open problems: higher-resolution scaling, hallucination, compositional capabilities. Hopes these reproducible baselines provide a reference for future research in open-source LMM.
+
+=== Limitations (main text, verbatim) ===
+Limitations. Despite the promising results demonstrated by LLaVA-1.5, it still has limitations including prolonged training for high-resolution images, lack of multiple-image understanding, limited problem solving capabilities in certain fields. It is not exempt from producing hallucinations, and should be used with caution in critical applications (e.g. medical). See appendix for a detailed discussion.
+
+=== Appendix C Limitations (verbatim) ===
+Despite the promising results demonstrated by LLaVA-1.5, several limitations must be acknowledged. First, LLaVA-1.5 utilizes full image patches, potentially prolonging each training iteration. While visual resamplers reduce the number of visual patches in LLMs, they currently cannot achieve convergence as efficiently as LLaVA with a comparable amount of training data, probably due to more trainable parameters in the resamplers. The development of a sample-efficient visual resampler could pave the way for future scaling-up of instruction-following multimodal models. Second, LLaVA-1.5 is not yet capable of processing multiple images due to the lack of such instruction-following data, and the limit of the context length. Third, although LLaVA-1.5 exhibits proficiency in following complex instructions, its problem-solving capabilities can still be limited in certain domains, which could be improved with a more capable language model and with high-quality, targeted visual instruction tuning data. Finally, despite its significantly reduced propensity for hallucination, LLaVA-1.5 is not exempt from producing hallucinations and occasionally disseminating misinformation, and should be used with caution in critical applications (e.g. medical).
+
+--- Cross-reference notes for ResearchLens ---
+[Referenced by / relevant to] MMMU (Yue et al., arXiv:2311.16502): LLaVA-1.5-13B used as a leading open-source baseline; validation 36.4 vs GPT-4V 56.8.
+[Referenced by / relevant to] Set-of-Mark (Yang et al., arXiv:2310.11441): reports LLaVA-1.5 REC accuracy 63.3 on RefCOCOg and observes SoM marks are essentially unreadable by LLaVA-1.5.
+[Referenced by / relevant to] Visual-CoT (Shao et al., arXiv:2403.16999): built on LLaVA-1.5 architecture/training recipe; LLaVA-1.5-7B/13B are the对照 baselines on the Visual CoT benchmark.
+[Self-limitation hooks] multi-image unsupported; domain-specific problem solving weak; hallucination persists; high-res training cost.

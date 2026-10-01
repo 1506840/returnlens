@@ -1,0 +1,3 @@
+{"id":"T001","item":"蓝牙耳机 TWS-X1","price":299,"cost_price":180,"activated":false,"note":"开机有异响，右边耳朵滋滋响，质量有问题我要退货","chat":["用户：耳机有杂音，右耳滋滋响\n客服：请问是播放音乐时还是待机时？\n用户：都响，刚拆开就这样","客服：麻烦提供一下开箱视频或照片\n用户：盒子扔了，但耳机确实有问题"],"logistics":"已签收1天","has_image":false}
+{"id":"T002","item":"机械键盘 K8 红轴","price":459,"cost_price":280,"activated":false,"note":"颜色跟图片不一样，不喜欢了","chat":["用户：实物偏灰，页面看着是银白\n客服：详情页有色差提示哦\n用户：那也太明显了吧，我要退"],"logistics":"已签收3天","has_image":true,"image_path":"data/images/T002_keyboard.jpg"}
+{"id":"T003","item":"显卡 RTX 4060","price":2399,"cost_price":2050,"activated":true,"note":"装上点不亮，怀疑是坏的，质量问题退货","chat":["用户：装上去风扇转但显示器无信号\n客服：请问您的电源是多少瓦？主板型号是？\n用户：不知道，反正就是坏的","客服：已激活商品非质量问题不支持七天无理由\n用户：我这就是质量问题！"],"logistics":"已签收5天","has_image":false}

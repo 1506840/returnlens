@@ -1,0 +1,41 @@
+Set-of-Mark Prompting Unleashes Extraordinary Visual Grounding in GPT-4V
+Jianwei Yang, Hao Zhang, Feng Li, Xueyan Zou, Chunyuan Li, Jianfeng Gao
+Microsoft Research, Redmond / HKUST / University of Wisconsin-Madison
+arXiv:2310.11441v2
+Local extract for ResearchLens seed corpus.
+
+Abstract
+We present Set-of-Mark (SoM), a new visual prompting method, to unleash the visual grounding abilities of large multimodal models (LMMs), such as GPT-4V. We employ off-the-shelf interactive segmentation models, such as SEEM/SAM, to partition an image into regions at different levels of granularity, and overlay these regions with a set of marks e.g., alphanumerics, masks, boxes. Using the marked image as input, GPT-4V can answer the questions that require visual grounding. We perform a comprehensive empirical study to validate the effectiveness of SoM on a wide range of fine-grained vision and multimodal tasks. Experiments show that GPT-4V with SoM outperforms the state-of-the-art fully-finetuned referring expression comprehension and segmentation model on RefCOCOg in a zero-shot setting.
+
+1 Introduction (key claims)
+Despite strong vision-language understanding, GPT-4V's fine-grained visual grounding ability is relatively weak, or yet to be unleashed: it can hardly produce accurate coordinate sequences for objects. Prompting GPT-4V to output textual description plus numeric coordinates both hurts LLM fluency and dismisses the spatial understanding ability of the vision models used by LMMs. Prior visual prompting (red circle, highlighted region, circles with arrows) is limited to visually referring to one or a few objects, and those marks are not easily "speakable" by LLMs. SoM = simply adding a set of marks on top of image regions; marks must be interpretable AND speakable. Contributions: (1) SoM prompting technique; (2) a new suite of evaluation benchmarks for grounding ability; (3) quantitative + qualitative validation across vision tasks.
+
+2 Method
+Formally, standard LMM inference T^o = F(I, T^i) becomes T^o = F(SoM(I), T^i).
+Image partition: MaskDINO (strong performance), SEEM (open vocabulary), SAM and Semantic-SAM (rich granularity) compiled into a partition toolbox; supports automatic and interactive modes.
+Mark generation: mark type must be image-dependent to avoid conflicts with original image content (numeric marks should be avoided on arithmetic images; alphabetic characters should not be used on document screenshots). Mark location: naive mask-center placement causes overlaps/confusion for dense objects or concave regions; the paper proposes a mark-allocation algorithm — sort masks by ascending area, exclude regions already covered, then use distance transform inside the remaining mask to place the mark where minimal distance to all boundary points is maximal; if a region is too small, move the mark slightly off the region.
+Prompt types: plain text prompt (no explicit reference to marks — GPT-4V grounds itself automatically) vs interleaved text prompt (marks injected into the text as symbolic references). Each question uses a fresh chat window to avoid context leakage.
+
+3 SoM for Vision Tasks
+Because each mark maps exclusively to a mask region, outputs can be traced back to pixels: r_k <-> m_k <-> text_k. Tasks examined: open-vocabulary image segmentation, referring segmentation (RES), referring expression comprehension (REC), phrase grounding, video object segmentation (VOS); region captioning / keypoint localization / part segmentation left to future work due to limited GPT-4V quota.
+
+4 Experiments
+Setup: no training required; GPT-4V API absent at the time, so experiments were run through the ChatGPT interface (all reported results are zero-shot). Because of quota limits, only a small subset of each validation split was used (typically 100 images; DAVIS 71 videos).
+Main results (GPT-4V + SoM): COCO OV seg precision 75.7; ADE20K 63.4; RefCOCOg REC ACC@0.5 86.4 (vs PolyFormer 85.8*, SEEM 65.7*, GPT-4V alone 25.7); RefCOCOg RES mIoU 75.6 (vs PolyFormer 67.2, SEEM 65.7); Flickr30K phrase grounding R@1 89.2 (vs Grounding DINO 90.5, GLIPv2 87.7); DAVIS2017 VOS J&F 78.8 (vs SegGPT 75.6, X-Decoder 62.8). Open-source LMM comparison: LLaVA-1.5 REC 63.3, Shikra 82.6*, MiniGPT-v2 84.4*, Ferret 85.8*.
+Ablations: adding boxes alongside numbers+masks improves Flickr30K R@1 84.4 -> 89.2; using ground-truth masks instead of predicted ones improves RefCOCOg mIoU 75.6 -> 90.1 (+14.5), i.e. the segmentation proposal quality is a real ceiling.
+
+=== §4.4 Qualitative Observations (verbatim limitation statements) ===
+The "golden" annotations are not always golden. When evaluating SoM, we find that a few human annotations in datasets are incorrect ... In contrast, GPT-4V with SoM yields correct answers. This implies that the "golden" labels in vision datasets may be subject to some noises while GPT-4V could be a good judge to help find the ambiguous annotations for further cleaning.
+The centered marks are not always the best. By default, our mark allocation algorithm finds the center for each region. However, we observe that putting marks at the central locations does not necessarily bring the best performance ... there are two marks, one is for the person and the other one for the backpack. When being asked which one is the person, GPT-4V gives the mark for the backpack which is located at the upper part of the human body ... the center of the grassland (labeled 2) is on the person (labeled 1). These results indicate that the focus of GPT-4V to understand visual contents is not necessarily at the center. Developing a better mark allocation algorithm should be considered.
+Dynamic selection of mark types. In realistic scenarios, we find dynamically determining which type of mark to use is important. For example, an image of arithmetic problems usually contains many numbers. In this case, overlaying numeric marks onto [it] will confuse the GPT-4V. Likewise, for a screenshot of a document, it might be not rational to overlay more alphabets on the image. As a result, to fully leverage the visual capability of GPT-4V, users may need to carefully design the SoM prompts before sending the image.
+
+=== §6 Discussion (verbatim limitation / future-work statements) ===
+The mystery in GPT-4V. It is still mysterious why the proposed Set-of-Mark Prompting could work so well with GPT-4V. Out of curiosity, we also ran some examples on other open-sourced LMMs such as LLaVa-1.5 and MiniGPT-v2. However, both models can hardly interpret the marks and ground themselves on those marks. We hypothesize a few reasons ... First, scale matters ... Second, the data curation strategy is probably another secret sauce for GPT-4V ... In the end, we note that all the above suspicions are not grounded on the facts but on some empirical studies as we conducted above.
+Connecting visual and LLMs prompting ... given the limited fine-grained training data and inferior open-sourced large vision and language models, we still see a clear gap.
+Scaling data via Set-of-Mark Prompting with GPT-4V ... how to further annotate these regions with semantic labels is still an open problem. We are envisioning the potential of using GPT-4V plus our Set-of-Mark Prompting to intensively scale up the multimodal data which has both fine-grained spatial and detailed language description.
+
+--- Cross-reference notes for ResearchLens ---
+[References] LLaVA-1.5 (arXiv:2310.03744) as an open-source LMM baseline; GPT-4V explorations (arXiv:2309.17421); SAM/SEEM/Semantic-SAM/MaskDINO/Grounding DINO as partition tools.
+[Referenced by] Visual-CoT (arXiv:2403.16999) cites SoM as the competing "visual mark" line of work; V* (arXiv:2312.14135) and GUI-agent papers build on SoM-style marking.
+[Discovered cross-paper gap] SoM shows marks beat coordinate output for GPT-4V, while VisCoT shows explicit bbox-coordinate CoT helps open-source LLaVA — the two make opposite claims about the right intermediate visual representation, and neither evaluates the other's setting.
+[Self-limitation hooks] manual mark-type design; center-placement suboptimality; fails on open-source LMMs; 100-image subsets only; depends on external segmentation proposal quality.
