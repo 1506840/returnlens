@@ -6,72 +6,112 @@ ResearchLens · LLM 调用与 JSON 解析公共层
 
 import os
 import sys
+import re
 import json
 import time
+import concurrent.futures
 from dotenv import load_dotenv
 from dashscope import Generation
 
 load_dotenv()
 API_KEY = os.getenv("DASHSCOPE_API_KEY")
 
+# 单次 API 调用墙钟超时（秒），避免演示时 UI 无限等待（M4）
+CALL_TIMEOUT = 60
 
-def call_qwen(messages, model="qwen-plus", max_retries=2):
-    """调用 Qwen API，返回原始文本；失败返回 None。"""
-    for attempt in range(max_retries + 1):
+
+def _safe_call(fn, timeout, *args, **kwargs):
+    """在线程中执行 fn，超时或异常统一返回 None，绝不向上抛。"""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(fn, *args, **kwargs)
         try:
-            resp = Generation.call(
-                model=model,
-                messages=messages,
-                api_key=API_KEY,
-                result_format="message",
-                temperature=0.1,
-            )
-            if resp.status_code == 200:
-                return resp.output.choices[0].message.content
-            print(f"  [重试 {attempt + 1}] HTTP {resp.status_code}", file=sys.stderr)
-        except Exception as e:
-            print(f"  [重试 {attempt + 1}] {e}", file=sys.stderr)
-        time.sleep(1.5)
+            return fut.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            print(f"  [超时] API 调用超过 {timeout}s", file=sys.stderr)
+            return None
+        except Exception as e:  # noqa: BLE001
+            print(f"  [异常] {e}", file=sys.stderr)
+            return None
+
+
+def call_qwen(messages, model="qwen-plus", max_retries=2, timeout=CALL_TIMEOUT):
+    """调用 Qwen API，返回原始文本；失败/超时返回 None。
+
+    任何一次调用超时被线程池截断（M4），并按指数退避重试。
+    """
+    for attempt in range(max_retries + 1):
+        resp = _safe_call(
+            Generation.call, timeout,
+            model=model, messages=messages, api_key=API_KEY,
+            result_format="message", temperature=0.1,
+        )
+        if resp is None:
+            print(f"  [重试 {attempt + 1}] 调用失败/超时", file=sys.stderr)
+        elif getattr(resp, "status_code", None) == 200:
+            return resp.output.choices[0].message.content
+        else:
+            print(f"  [重试 {attempt + 1}] HTTP {getattr(resp, 'status_code', '?')}", file=sys.stderr)
+        time.sleep(min(1.5 * (2 ** attempt), 8))
     return None
 
 
 def extract_json(text):
     """从模型输出中提取 JSON 对象；失败返回 None。
-    兼容 ```json 包裹、前后多余文字等情况。"""
+
+    解析顺序：① 直接 json.loads → ② 去 ```json 围栏 → ③ 取最外层平衡花括号块
+    （用括号深度匹配，避免模型在 JSON 外写带 } 的文字导致截断）。
+    """
     if not text:
         return None
     text = text.strip()
-    # 去掉 markdown 代码块
-    if text.startswith("```"):
-        lines = text.split("\n")
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-    lo, hi = text.find("{"), text.rfind("}")
-    if lo == -1 or hi == -1 or hi <= lo:
-        return None
+    # ① 直接解析
     try:
-        return json.loads(text[lo:hi + 1])
-    except json.JSONDecodeError:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # ② 去 ```json / ``` 围栏
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    if fence:
+        candidate = fence.group(1).strip()
+        try:
+            return json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        text = candidate
+    # ③ 取最外层平衡花括号块
+    start = text.find("{")
+    if start == -1:
         return None
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except (json.JSONDecodeError, ValueError):
+                    return None
+    return None
 
 
-def call_qwen_multimodal(image_base64, prompt, model="qwen-vl-plus", max_retries=2):
+def call_qwen_multimodal(image_base64, prompt, model="qwen-vl-plus",
+                         max_retries=2, timeout=CALL_TIMEOUT):
     """调用 Qwen 多模态 API（视觉-语言），返回模型响应文本。
-    
+
     参数:
         image_base64: base64 编码的图片字符串
         prompt: 文本提示
         model: 模型名称，默认 qwen-vl-plus
         max_retries: 最大重试次数
-    
+        timeout: 单次调用墙钟超时（秒）
+
     返回:
-        模型响应文本；失败返回空字符串
+        模型响应文本；失败/超时返回 None（与 call_qwen 统一语义，M4）
     """
     from dashscope import MultiModalConversation
-    
+
     messages = [
         {
             "role": "user",
@@ -81,28 +121,27 @@ def call_qwen_multimodal(image_base64, prompt, model="qwen-vl-plus", max_retries
             ]
         }
     ]
-    
+
     for attempt in range(max_retries + 1):
-        try:
-            resp = MultiModalConversation.call(
-                model=model,
-                messages=messages,
-                api_key=API_KEY,
-            )
-            if getattr(resp, "status_code", 200) == 200:
-                content = resp.output.choices[0].message.content
-                # qwen-vl 返回可能是 list[{'text':...}] 或 str
-                if isinstance(content, list):
-                    parts = []
-                    for c in content:
-                        if isinstance(c, dict) and c.get("text"):
-                            parts.append(c["text"])
-                        elif isinstance(c, str):
-                            parts.append(c)
-                    return "\n".join(parts).strip()
-                return str(content).strip()
+        resp = _safe_call(
+            MultiModalConversation.call, timeout,
+            model=model, messages=messages, api_key=API_KEY,
+        )
+        if resp is None:
+            print(f"  [重试 {attempt + 1}] 调用失败/超时", file=sys.stderr)
+        elif getattr(resp, "status_code", None) == 200:
+            content = resp.output.choices[0].message.content
+            # qwen-vl 返回可能是 list[{'text':...}] 或 str
+            if isinstance(content, list):
+                parts = []
+                for c in content:
+                    if isinstance(c, dict) and c.get("text"):
+                        parts.append(c["text"])
+                    elif isinstance(c, str):
+                        parts.append(c)
+                return "\n".join(parts).strip()
+            return str(content).strip()
+        else:
             print(f"  [重试 {attempt + 1}] HTTP {getattr(resp, 'status_code', '?')}", file=sys.stderr)
-        except Exception as e:
-            print(f"  [重试 {attempt + 1}] {e}", file=sys.stderr)
-        time.sleep(1.5)
-    return ""
+        time.sleep(min(1.5 * (2 ** attempt), 8))
+    return None

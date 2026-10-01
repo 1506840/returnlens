@@ -8,12 +8,13 @@
 
 import json
 import os
+import re
 import hashlib
 import base64
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from llm import call_qwen_multimodal
+from llm import call_qwen_multimodal, extract_json
 from taxonomy import CHART_TYPES, DISCREPANCY_TYPES
 
 # 缓存路径
@@ -160,7 +161,6 @@ def detect_discrepancy(
         claim_lower = claim.lower()
         
         # 提取声明中的数值（跳过紧跟字母的数字，如 "F1" 中的 "1"）
-        import re
         numbers = re.findall(r'(?<![a-zA-Z])(\d+\.?\d*)\s*%?', claim)
         
         if not numbers:
@@ -230,32 +230,7 @@ def detect_discrepancy(
     return discrepancies
 
 
-def extract_json(text: str) -> Optional[Dict]:
-    """从 LLM 响应中提取 JSON 对象"""
-    # 尝试直接解析
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    
-    # 尝试提取 ```json ... ``` 块
-    import re
-    json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group(1))
-        except json.JSONDecodeError:
-            pass
-    
-    # 尝试提取 { ... } 块
-    brace_match = re.search(r'\{.*\}', text, re.DOTALL)
-    if brace_match:
-        try:
-            return json.loads(brace_match.group(0))
-        except json.JSONDecodeError:
-            pass
-    
-    return None
+# extract_json 已统一到 llm.py（M1）：from llm import extract_json
 
 
 def analyze_chart_and_text(
