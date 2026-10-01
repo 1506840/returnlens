@@ -43,8 +43,9 @@ hypotheses: [
       impact: { value: 0-1, evidence: "一条证据说明影响力" },
       evidence_strength: { value: 0-1, evidence: "一条证据说明证据强度" }
     },
-    gate_passed: bool（是否通过门控，你不需要填，系统会计算）
-    gate_reason: string（如果未通过门控，说明原因）
+    gate_flags: 【门控标志】
+    gate_passed: bool（系统会计算，你不需要填）,
+    gate_reason: string（系统会计算，你不需要填）
   }
 ]
 
@@ -66,6 +67,7 @@ verifiable_via 可选值：公开基准跑分 / 消融实验 / 统计检验 / �
 2. 每个子分（novelty/feasibility/impact/evidence_strength）必须在 0-1 之间。
 3. 每个子分必须附带 evidence，不能为空。
 4. hypothesis_kind / resource_tag / verifiable_via 必须在封闭枚举内。
+5. gate_flags 必须如实填写：对每条门控规则，若假设确实违反/不满足则填 true，否则填 false。这是门控拦截的唯一依据，严禁一律填 false；尤其当 statement 明显反物理、无法验证或已被充分研究时，必须如实标 true。
 
 仅输出 JSON 对象本身。"""
 
@@ -82,64 +84,87 @@ def _build_taxonomy_prompt():
 """
 
 
+def _build_gate_prompt():
+    """用 taxonomy.GATE_RULES 动态构造门控标志字段说明（让 GATE_RULES 真正被使用）"""
+    lines = ["{"]
+    for rule, desc in GATE_RULES:
+        lines.append(f'      {rule}: bool（是否{desc}，true=违反/存在问题）')
+    lines.append("    }")
+    return "\n".join(lines)
+
+
 # 将枚举注入 prompt
 SYSTEM_PROMPT = SYSTEM_PROMPT.replace(
     "【封闭枚举】",
     "【封闭枚举】\n" + _build_taxonomy_prompt()
 )
 
+# 将门控规则注入 prompt（GATE_RULES 实际落地）
+SYSTEM_PROMPT = SYSTEM_PROMPT.replace(
+    "【门控标志】",
+    _build_gate_prompt()
+)
+
 
 def gate(hypothesis, budget_days=30):
-    """门控过滤：检查假设是否满足基本条件
-    
-    门控规则（来自 taxonomy.GATE_RULES）：
-    - violates_physical: 违反已知物理/数学定律
-    - no_testable_prediction: 无法导出可验证的预测
-    - already_answered: 已被现有文献充分回答
-    - data_unavailable: 所需数据不可获取
-    - effort_exceeds_budget: 预估工时超出预算
-    
+    """门控过滤：结构校验 + 语义门控（来自 taxonomy.GATE_RULES）
+
+    结构校验保证假设具备最低可用性（陈述/方法/证据/rationale/预算/分数范围）；
+    语义门控读取 LLM 返回的 gate_flags，对 5 条规则做"违反即拦截"判定。
+    任何一项失败即整体不通过，reason 汇总所有失败原因。
+
     返回 (passed: bool, reason: str)
     """
+    fails = []
+
     statement = hypothesis.get("statement", "")
-    
-    # 规则 1: 必须有可验证的预测
+
+    # 结构规则 1: 必须有可验证的预测
     if not statement or len(statement) < 10:
-        return False, "假设陈述过短，无法构成可验证的命题"
-    
-    # 规则 2: 必须有实验方法
+        fails.append("假设陈述过短，无法构成可验证的命题")
+
+    # 结构规则 2: 必须有实验方法
     methodology = hypothesis.get("methodology", "")
     if not methodology or len(methodology) < 20:
-        return False, "缺少具体的实验验证方法"
-    
-    # 规则 3: 必须有证据支撑
+        fails.append("缺少具体的实验验证方法")
+
+    # 结构规则 3: 必须有证据支撑
     evidence = hypothesis.get("evidence", [])
     if not evidence or len(evidence) == 0:
-        return False, "缺少支撑假设的文献证据"
-    
-    # 规则 4: 必须有 rationale
+        fails.append("缺少支撑假设的文献证据")
+
+    # 结构规则 4: 必须有 rationale
     rationale = hypothesis.get("rationale", "")
     if not rationale or len(rationale) < 20:
-        return False, "缺少假设的价值说明（rationale）"
-    
-    # 规则 5: effort_days 必须在预算内
+        fails.append("缺少假设的价值说明（rationale）")
+
+    # 结构规则 5: effort_days 必须在预算内
     effort_days = hypothesis.get("effort_days", 999)
     if not isinstance(effort_days, (int, float)):
-        return False, f"effort_days 类型错误: {type(effort_days)}"
-    if effort_days > budget_days:
-        return False, f"预估工时 {effort_days} 天超出预算 {budget_days} 天"
-    
-    # 规则 6: 所有子分必须在 [0, 1] 范围内
+        fails.append(f"effort_days 类型错误: {type(effort_days)}")
+    elif effort_days > budget_days:
+        fails.append(f"预估工时 {effort_days} 天超出预算 {budget_days} 天")
+
+    # 结构规则 6: 所有子分必须在 [0, 1] 范围内
     scores = hypothesis.get("scores", {})
     for dim in SCORE_DIMENSIONS:
         score_obj = scores.get(dim, {})
         if not isinstance(score_obj, dict):
-            return False, f"评分维度 {dim} 格式错误"
+            fails.append(f"评分维度 {dim} 格式错误")
+            continue
         value = score_obj.get("value")
         if not isinstance(value, (int, float)) or value < 0 or value > 1:
-            return False, f"评分维度 {dim} 的值 {value} 不在 [0, 1] 范围内"
-    
-    return True, "通过所有门控规则"
+            fails.append(f"评分维度 {dim} 的值 {value} 不在 [0, 1] 范围内")
+
+    # 语义门控：聚合 LLM 返回的 GATE_RULES 标志
+    flags = hypothesis.get("gate_flags") or {}
+    for rule, desc in GATE_RULES:
+        if flags.get(rule) is True:
+            fails.append(f"门控拦截（{rule}）：{desc}")
+
+    if fails:
+        return False, "；".join(fails)
+    return True, "通过所有门控规则（结构校验 + 语义门控）"
 
 
 def score(hypothesis):

@@ -41,13 +41,13 @@ ResearchLens 是一套**科研认知增强流水线**：把研究者需要数天
 **2. 门控拦截的可解释性**
 
 假设生成不是"有求必应"，而是通过 5 道门控规则过滤：
-- 违反已知物理/数学定律
-- 无法导出可验证的预测
-- 已被现有文献充分回答
-- 所需数据不可获取
-- 预估工时超出预算
+- 违反已知物理/数学定律（violates_physical）
+- 无法导出可验证的预测（no_testable_prediction）
+- 已被现有文献充分回答（already_answered）
+- 所需数据不可获取（data_unavailable）
+- 预估工时超出预算（effort_exceeds_budget）
 
-每条被拦截的假设都附带具体原因。
+门控由两层构成：**结构校验**（陈述/方法/证据/rationale 长度、预算、子分范围）+ **语义门控**（LLM 在生成时对上述 5 条规则逐条返回布尔判断 `gate_flags`，`hypothesis_generator.gate()` 聚合二者，任一违反即拦截）。规则定义唯一真源在 `taxonomy.GATE_RULES`，prompt 动态注入，避免文档与代码脱节。每条被拦截的假设都附带具体原因。
 
 **3. 多维可行性评分**
 
