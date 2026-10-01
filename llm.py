@@ -19,22 +19,30 @@ API_KEY = os.getenv("DASHSCOPE_API_KEY")
 # 单次 API 调用墙钟超时（秒），避免演示时 UI 无限等待（M4）
 CALL_TIMEOUT = 60
 
+# 模型标识：默认与真实调用一致，可用环境变量覆盖（H-A）。
+# 统一真源：UI 顶部 badge、文献挖掘、假设生成、图表理解共用，杜绝"宣称与实际不符"。
+TEXT_MODEL = os.getenv("DASHSCOPE_TEXT_MODEL", "qwen-plus")
+VL_MODEL = os.getenv("DASHSCOPE_VL_MODEL", "qwen-vl-plus")
+
+# 复用线程池：避免每次调用都新建 executor（L-B）。max_workers 取 4，
+# 单次超时未返回的任务只占一个槽位，不会阻塞后续调用（本项目串行调用为主）。
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
 
 def _safe_call(fn, timeout, *args, **kwargs):
     """在线程中执行 fn，超时或异常统一返回 None，绝不向上抛。"""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        fut = ex.submit(fn, *args, **kwargs)
-        try:
-            return fut.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            print(f"  [超时] API 调用超过 {timeout}s", file=sys.stderr)
-            return None
-        except Exception as e:  # noqa: BLE001
-            print(f"  [异常] {e}", file=sys.stderr)
-            return None
+    fut = _EXECUTOR.submit(fn, *args, **kwargs)
+    try:
+        return fut.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        print(f"  [超时] API 调用超过 {timeout}s", file=sys.stderr)
+        return None
+    except Exception as e:  # noqa: BLE001
+        print(f"  [异常] {e}", file=sys.stderr)
+        return None
 
 
-def call_qwen(messages, model="qwen-plus", max_retries=2, timeout=CALL_TIMEOUT):
+def call_qwen(messages, model=TEXT_MODEL, max_retries=2, timeout=CALL_TIMEOUT):
     """调用 Qwen API，返回原始文本；失败/超时返回 None。
 
     任何一次调用超时被线程池截断（M4），并按指数退避重试。
@@ -96,7 +104,7 @@ def extract_json(text):
     return None
 
 
-def call_qwen_multimodal(image_base64, prompt, model="qwen-vl-plus",
+def call_qwen_multimodal(image_base64, prompt, model=VL_MODEL,
                          max_retries=2, timeout=CALL_TIMEOUT):
     """调用 Qwen 多模态 API（视觉-语言），返回模型响应文本。
 
